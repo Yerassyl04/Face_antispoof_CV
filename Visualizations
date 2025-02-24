@@ -1,0 +1,229 @@
+import cv2
+import numpy as np
+import os
+import matplotlib.pyplot as plt
+import pickle
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.applications import MobileNet
+from tensorflow.keras.layers import GlobalAveragePooling2D, Dense, Dropout
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import ModelCheckpoint
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from collections import Counter
+
+data_dir = r"C:\\Users\\asus\\Downloads\\Face antispoof\\processed\\"
+new_model_path = "improved_anti_spoofing_mobilenet.h5"
+history_path = "training_history.pkl"
+
+history = None
+if os.path.exists(new_model_path):
+    model = load_model(new_model_path)
+    if os.path.exists(history_path):
+        with open(history_path, 'rb') as f:
+            history = pickle.load(f)
+    else:
+        # Retrain if history is missing
+        datagen = ImageDataGenerator(
+            rescale=1./255,
+            rotation_range=20,
+            width_shift_range=0.2,
+            height_shift_range=0.2,
+            shear_range=0.2,
+            zoom_range=0.2,
+            horizontal_flip=True,
+            fill_mode='nearest'
+        )
+
+        train_gen = datagen.flow_from_directory(
+            os.path.join(data_dir, 'train'),
+            target_size=(128, 128),
+            batch_size=32,
+            class_mode='binary'
+        )
+
+        val_gen = datagen.flow_from_directory(
+            os.path.join(data_dir, 'valid'),
+            target_size=(128, 128),
+            batch_size=32,
+            class_mode='binary'
+        )
+
+        # Base model
+        base_model = MobileNet(weights='imagenet', include_top=False, input_shape=(128, 128, 3))
+        x = base_model.output
+        x = GlobalAveragePooling2D()(x)
+        x = Dense(128, activation='relu')(x)
+        x = Dropout(0.5)(x)
+        predictions = Dense(1, activation='sigmoid')(x)
+        model = Model(inputs=base_model.input, outputs=predictions)
+
+        # Compile the model
+        model.compile(optimizer=Adam(learning_rate=0.0001), loss='binary_crossentropy', metrics=['accuracy'])
+
+        # Train the model
+        checkpoint = ModelCheckpoint(new_model_path, monitor='val_accuracy', save_best_only=True, mode='max')
+        history_obj = model.fit(train_gen, validation_data=val_gen, epochs=20, callbacks=[checkpoint])
+
+        # Save training history
+        with open(history_path, 'wb') as f:
+            pickle.dump(history_obj.history, f)
+
+        history = history_obj.history
+else:
+    # Data augmentation
+    datagen = ImageDataGenerator(
+        rescale=1./255,
+        rotation_range=20,
+        width_shift_range=0.2,
+        height_shift_range=0.2,
+        shear_range=0.2,
+        zoom_range=0.2,
+        horizontal_flip=True,
+        fill_mode='nearest'
+    )
+
+    train_gen = datagen.flow_from_directory(
+        os.path.join(data_dir, 'train'),
+        target_size=(128, 128),
+        batch_size=32,
+        class_mode='binary'
+    )
+
+    val_gen = datagen.flow_from_directory(
+        os.path.join(data_dir, 'valid'),
+        target_size=(128, 128),
+        batch_size=32,
+        class_mode='binary'
+    )
+
+    # Base model
+    base_model = MobileNet(weights='imagenet', include_top=False, input_shape=(128, 128, 3))
+    x = base_model.output
+    x = GlobalAveragePooling2D()(x)
+    x = Dense(128, activation='relu')(x)
+    x = Dropout(0.5)(x)
+    predictions = Dense(1, activation='sigmoid')(x)
+    model = Model(inputs=base_model.input, outputs=predictions)
+
+    # Compile the model
+    model.compile(optimizer=Adam(learning_rate=0.0001), loss='binary_crossentropy', metrics=['accuracy'])
+
+    # Train the model
+    checkpoint = ModelCheckpoint(new_model_path, monitor='val_accuracy', save_best_only=True, mode='max')
+    history_obj = model.fit(train_gen, validation_data=val_gen, epochs=20, callbacks=[checkpoint])
+
+    # Save training history
+    with open(history_path, 'wb') as f:
+        pickle.dump(history_obj.history, f)
+
+    history = history_obj.history
+
+# Pie Chart for Data Distribution
+def plot_data_distribution(data_dir):
+    train_dir = os.path.join(data_dir, 'train')
+    class_counts = Counter()
+    for class_name in os.listdir(train_dir):
+        class_dir = os.path.join(train_dir, class_name)
+        if os.path.isdir(class_dir):
+            class_counts[class_name] = len(os.listdir(class_dir))
+
+    # Plot pie chart
+    plt.figure(figsize=(6, 6))
+    plt.pie(class_counts.values(), labels=class_counts.keys(), autopct='%1.1f%%', startangle=90, colors=['lightgreen', 'lightcoral'])
+    plt.title("Dataset Distribution")
+    plt.show()
+
+plot_data_distribution(data_dir)
+
+# Confusion Matrix
+val_gen = ImageDataGenerator(rescale=1./255).flow_from_directory(
+    os.path.join(data_dir, 'valid'),
+    target_size=(128, 128),
+    batch_size=32,
+    class_mode='binary',
+    shuffle=False
+)
+
+y_pred = model.predict(val_gen)
+y_pred_classes = (y_pred > 0.5).astype(int)
+y_true = val_gen.classes
+
+cm = confusion_matrix(y_true, y_pred_classes)
+cmd = ConfusionMatrixDisplay(cm, display_labels=['Spoof', 'Real'])
+cmd.plot(cmap=plt.cm.Blues)
+plt.title('Confusion Matrix')
+plt.show()
+
+# Visualize Training History
+def plot_training_history(history):
+    if not history or not isinstance(history, dict):
+        print("No valid training history available to plot.")
+        return
+
+    plt.figure(figsize=(12, 5))
+
+    # Accuracy
+    plt.subplot(1, 2, 1)
+    plt.plot(history.get('accuracy', []), label='Train Accuracy')
+    plt.plot(history.get('val_accuracy', []), label='Validation Accuracy')
+    plt.title('Model Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+
+    # Loss
+    plt.subplot(1, 2, 2)
+    plt.plot(history.get('loss', []), label='Train Loss')
+    plt.plot(history.get('val_loss', []), label='Validation Loss')
+    plt.title('Model Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+# Plot training history if available
+if history and isinstance(history, dict):
+    plot_training_history(history)
+else:
+    print("No valid training history available to plot.")
+
+# Real-Time Webcam Detection
+def real_time_detection(model):
+    cap = cv2.VideoCapture(0)
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+
+        for (x, y, w, h) in faces:
+            face = frame[y:y+h, x:x+w]
+            face_resized = cv2.resize(face, (128, 128))
+            face_resized = face_resized.astype("float32") / 255.0
+            face_resized = np.expand_dims(face_resized, axis=0)
+
+            pred = model.predict(face_resized)[0][0]
+            label = "Spoof" if pred > 0.5 else "Real"
+            confidence = pred if pred > 0.5 else 1 - pred
+
+            color = (0, 255, 0) if label == "Real" else (0, 0, 255)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+            cv2.putText(frame, f"{label}: {confidence*100:.2f}%", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+
+        cv2.imshow("Anti-Spoofing Detection", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+# Run real-time detection
+real_time_detection(model)
