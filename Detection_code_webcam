@@ -1,0 +1,90 @@
+import cv2
+import numpy as np
+import os
+from tensorflow.keras.models import load_model
+from tensorflow.keras.applications import MobileNet
+from tensorflow.keras.layers import GlobalAveragePooling2D, Dense, Dropout
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.callbacks import ModelCheckpoint
+from sklearn.utils.class_weight import compute_class_weight
+
+data_dir = r"C:\\Users\\asus\\Downloads\\Face antispoof\\processed\\"
+new_model_path = "improved_anti_spoofing_mobilenet.h5"
+
+if os.path.exists(new_model_path):
+    model = load_model(new_model_path)
+else:
+    # Data augmentation
+    datagen = ImageDataGenerator(
+        rescale=1./255,
+        rotation_range=20,
+        width_shift_range=0.2,
+        height_shift_range=0.2,
+        shear_range=0.2,
+        zoom_range=0.2,
+        horizontal_flip=True,
+        fill_mode='nearest'
+    )
+
+    train_gen = datagen.flow_from_directory(os.path.join(data_dir, 'train'), target_size=(128, 128), batch_size=32, class_mode='binary')
+    val_gen = datagen.flow_from_directory(os.path.join(data_dir, 'valid'), target_size=(128, 128), batch_size=32, class_mode='binary')
+
+    # class indices
+    print("Class Indices:", train_gen.class_indices)  # Ensure 'real' and 'spoof' are correctly mapped
+
+    #  class weights
+    classes = np.array([0, 1])  # 0: Spoof, 1: Real
+    class_weights = compute_class_weight(class_weight='balanced', classes=classes, y=train_gen.classes)
+    class_weights = {0: class_weights[0] * 1.5, 1: class_weights[1]}  # Increase weight for spoof class
+
+    #  use MobileNet as a base model
+    base_model = MobileNet(weights='imagenet', include_top=False, input_shape=(128, 128, 3))
+    x = base_model.output
+    x = GlobalAveragePooling2D()(x)
+    x = Dense(128, activation='relu')(x)
+    x = Dropout(0.5)(x)
+    predictions = Dense(1, activation='sigmoid')(x)
+    model = Model(inputs=base_model.input, outputs=predictions)
+
+    # Compile the model
+    model.compile(optimizer=Adam(learning_rate=0.0001), loss='binary_crossentropy', metrics=['accuracy'])
+
+    # Train the model
+    checkpoint = ModelCheckpoint(new_model_path, monitor='val_accuracy', save_best_only=True, mode='max')
+    model.fit(train_gen, validation_data=val_gen, epochs=20, callbacks=[checkpoint], class_weight=class_weights)
+
+# Real-time detection
+cap = cv2.VideoCapture(0)
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+
+    for (x, y, w, h) in faces:
+        face = frame[y:y+h, x:x+w]
+        face_resized = cv2.resize(face, (128, 128))
+        face_resized = face_resized.astype("float32") / 255.0
+        face_resized = np.expand_dims(face_resized, axis=0)
+
+        pred = model.predict(face_resized)[0][0]
+        # Adjust label logic if necessary
+        label = "Spoof" if pred > 0.5 else "Real"  # Swap labels if needed
+        confidence = pred if pred > 0.5 else 1 - pred
+
+        color = (0, 255, 0) if label == "Real" else (0, 0, 255)
+        cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+        cv2.putText(frame, f"{label}: {confidence*100:.2f}%", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+
+    cv2.imshow("Anti-Spoofing Detection", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
