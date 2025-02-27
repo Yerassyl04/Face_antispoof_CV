@@ -1,4 +1,4 @@
 Poster of the project
-![ISCV_posterpng](https://github.com/user-attachments/assets/01899fbf-8d9b-4427-85e5-01bce48d054a)
+![ISCV_posterupd](https://github.com/user-attachments/assets/add4b334-600a-4ece-8492-75d8cef61226)
 
 
