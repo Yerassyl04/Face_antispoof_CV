@@ -1,3 +1,4 @@
 Poster of the project
+![ISCV_posterpng](https://github.com/user-attachments/assets/01899fbf-8d9b-4427-85e5-01bce48d054a)
 
-![image](https://github.com/user-attachments/assets/3c5d7940-70b8-4914-8640-c291b7e3fa41)
+
